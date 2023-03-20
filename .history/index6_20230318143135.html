@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Audio API Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.16/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: rgba(30, 41, 59, 0.8);
+        }
+    </style>
+    <script>
+        let audioContext;
+        let activeVoices = new Map();
+
+        async function init() {
+            audioContext = new AudioContext();
+            if (navigator.requestMIDIAccess) {
+                try {
+                    const midiAccess = await navigator.requestMIDIAccess();
+                    midiAccess.inputs.forEach(input => input.onmidimessage = onMidiMessage);
+                } catch (err) {
+                    console.error('No se pudo acceder a tus dispositivos MIDI.', err);
+                }
+            } else {
+                console.error('Tu navegador no soporta el API Web MIDI.');
+            }
+        }
+
+        function onMidiMessage(event) {
+            const [status, data1, data2] = event.data;
+            const messageType = status & 0xf0;
+            const channel = status & 0x0f;
+            const note = data1;
+            const velocity = data2;
+            if (messageType === 0x90 && velocity > 0) {
+                startSound(note, velocity / 127);
+            }
+            else if (messageType === 0x80 || (messageType === 0x90 && velocity === 0)) {
+                stopSound(note);
+            }
+        }
+
+        function startSound(note, velocity) {
+            const filterType = document.getElementById("filterType").value;
+            const filterFrequency = parseFloat(document.getElementById("filterFrequency").value);
+            const filterQ = parseFloat(document.getElementById("filterQ").value);
+
+            const frequency = midiNoteToFrequency(note);
+            const waveType1 = document.getElementById("waveType1").value;
+            const waveType2 = document.getElementById("waveType2").value;
+            const pitch1 = parseFloat(document.getElementById("pitch1").value);
+            const pitch2 = parseFloat(document.getElementById("pitch2").value);
+
+
+                        // Osciladores
+                        const osc1 = audioContext.createOscillator();
+                        osc1.frequency.value = frequency * pitch1;
+                        osc1.type = waveType1;
+                        osc1.start();
+            
+                        const osc2 = audioContext.createOscillator();
+                        osc2.frequency.value = frequency * pitch2;
+                        osc2.type = waveType2;
+                        osc2.start();
+
+            const gainNode = audioContext.createGain();
+            const filterNode = audioContext.createBiquadFilter();
+
+
+            filterNode.type = filterType;
+            filterNode.frequency.value = filterFrequency;
+            filterNode.Q.value = filterQ;
+
+            const attack = 0;
+            const decay = 0.3;
+            const sustain = 0.5;
+            const release = 0.3;
+
+            const now = audioContext.currentTime;
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(velocity, now + attack);
+            gainNode.gain.linearRampToValueAtTime(sustain * velocity, now + attack + decay);
+
+            osc1.connect(filterNode);
+            osc2.connect(filterNode);
+            filterNode.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            activeVoices.set(note, { osc1, osc2, gainNode, filterNode });
+        }
+
+        function stopSound(note) {
+            const voice = activeVoices && activeVoices.get(note);
+            if (voice) {
+                const { osc1, osc2, gainNode, filterNode } = voice;
+                const now = audioContext.currentTime;
+                gainNode.gain.cancelScheduledValues(now);
+                gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+                gainNode.gain.linearRampToValueAtTime(0, now + 0.1);
+                osc1.stop(now + 0.1);
+                osc2.stop(now + 0.1);
+
+                setTimeout(() => {
+                    osc1.disconnect(filterNode);
+                    osc2.disconnect(filterNode);
+                    filterNode.disconnect(gainNode);
+                    gainNode.disconnect(audioContext.destination);
+                }, 100);
+
+                activeVoices.delete(note);
+            }
+        }
+
+        function midiNoteToFrequency(note) {
+            return 440 * Math.pow(2, (note - 69) / 12);
+        }
+
+        window.addEventListener('load', init);
+      
+        </script>
+    </head>
+<body class="bg-gray-900 text-white">
+    <div class="container mx-auto">
+        <h1 class="text-4xl text-center">Web Audio API Test</h1>
+        <div class="flex justify-center">
+            <div class="w-1/2">
+                <div class="flex flex-wrap">
+                    <div class="w-1/2">
+                        <label for="waveType1">Onda Oscilador 1</label>
+                        <select id="waveType1" class="w-full">
+                            <option value="sine">Seno</option>
+                            <option value="square">Cuadrada</option>
+                            <option value="sawtooth">Diente de sierra</option>
+                            <option value="triangle">Triangular</option>
+                        </select>
+                    </div>
+                    <div class="w-1/2">
+                        <label for="waveType2">Onda Oscilador 2</label>
+                        <select id="waveType2" class="w-full">
+                            <option value="sine">Seno</option>
+                            <option value="square">Cuadrada</option>
+                            <option value="sawtooth">Diente de sierra</option>
+                            <option value="triangle">Triangular</option>
+                        </select>
+                    </div>
+                    <div class="w-1/2">
+                        <label for="pitch1">Pitch Oscilador 1</label>
+                        <input id="pitch1" type="number" class="w-full" value="1" min="0.5" max="2" step="0.01">
+                    </div>
+                    <div class="w-1/2">
+                        <label for="pitch2">Pitch Oscilador 2</label>
+                        <input id="pitch2" type="number" class="w-full" value="1" min="0.5" max="2" step="0.01">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

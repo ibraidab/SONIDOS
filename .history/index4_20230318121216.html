@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Audio API Test</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.16/dist/tailwind.min.css" rel="stylesheet">
+  <script>
+    let audioContext;
+    let activeVoices = new Map(); // Almacenar voces activas para polifonía
+
+    async function init() {
+      audioContext = new AudioContext();
+
+      // Solicitar acceso al API Web MIDI
+      if (navigator.requestMIDIAccess) {
+        try {
+          const midiAccess = await navigator.requestMIDIAccess();
+          midiAccess.inputs.forEach(input => input.onmidimessage = onMidiMessage);
+        } catch (err) {
+          console.error('No se pudo acceder a tus dispositivos MIDI.', err);
+        }
+      } else {
+        console.error('Tu navegador no soporta el API Web MIDI.');
+      }
+    }
+
+    function onMidiMessage(event) {
+      const [status, data1, data2] = event.data;
+      const messageType = status & 0xf0;
+      const channel = status & 0x0f;
+      const note = data1;
+      const velocity = data2;
+
+      // Nota encendida
+      if (messageType === 0x90 && velocity > 0) {
+        startSound(note, velocity / 127);
+      }
+      // Nota apagada
+      else if (messageType === 0x80 || (messageType === 0x90 && velocity === 0)) {
+        stopSound(note);
+      }
+    }
+
+    function startSound(note, velocity) {
+      const frequency = midiNoteToFrequency(note);
+      const waveType = document.getElementById("waveType").value;
+
+      // Osciladores
+      const osc1 = audioContext.createOscillator();
+      osc1.frequency.value = frequency;
+      osc1.type = waveType;
+      osc1.start();
+
+      const osc2 = audioContext.createOscillator();
+      osc2.frequency.value = frequency * 2;
+      osc2.type = waveType;
+      osc2.start();
+
+      // Ganancia
+      const gainNode = audioContext.createGain();
+
+      // Filtro
+      const filterNode = audioContext.createBiquadFilter();
+      filterNode.type = "lowpass";
+      filterNode.frequency.value = 1000;
+      filterNode.Q.value = 10;
+
+      // Envolvente ADSR
+      const attack = 0.1;
+      const decay = 0.3;
+      const sustain = 0.5;
+      const release = 0.8;
+
+      const now = audioContext.currentTime;
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(velocity, now + attack);
+      gainNode.gain.linearRampToValueAtTime(sustain * velocity, now + attack + decay);
+
+      // Conexiones
+      osc1.connect(gainNode);
+      osc2.connect(gainNode);
+      gainNode.connect(filterNode);
+      filterNode.connect(audioContext.destination);
+
+      // Almacenar voces activas
+      activeVoices.set(note, { osc1, osc2, gainNode });
+    }
+
+    function stopSound(note) {
+      const voice = activeVoices && activeVoices.get(note);
+        if (voice) {
+            const { osc1, osc2, gainNode } = voice;
+            const now = audioContext.currentTime;
+            gainNode.gain.cancelScheduledValues(now);
+            gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+            gainNode.gain.linearRampToValueAtTime(0, now + 0.1);
+            osc1.stop(now + 0.1);
+            osc2.stop(now + 0.1);
+            activeVoices.delete(note);
+        }
+    }
+
+    function midiNoteToFrequency(note) {
+      return 440 * Math.pow(2, (note - 69) / 12);
+    }
+
+    function changeWaveType() {
+      const waveType = document.getElementById("waveType").value;
+      activeVoices.forEach(voice => {
+        voice.osc1.type = waveType;
+        voice.osc2.type = waveType;
+      });
+    }
+
+    function changeFilterFrequency() {
+        const filterFrequencyRange = document.getElementById("filterFrequency");
+        const newFrequencyValue = filterFrequencyRange.value;
+        activeVoices.forEach(voice => {
+          voice.filterNode.frequency.value = newFrequencyValue;
+        });
+        console.log("frecuencia: ", newFrequencyValue)
+      }
+
+      function changeFilterQ() {
+        const filterQ = document.getElementById("filterQ").value;
+        activeVoices.forEach(voice => {
+          voice.filterNode.Q.value = filterQ;
+        });
+        console.log("res: ", filterQ)
+      }
+
+    function changeFilterType() {
+        const filterTypeSelect = document.getElementById("filterType");
+        console.log("tipo:", filterTypeSelect.options[filterTypeSelect.selectedIndex].value)
+        const selectedFilterType = filterTypeSelect.options[filterTypeSelect.selectedIndex].value;
+        activeVoices.forEach(voice => {
+          voice.filterNode.type = selectedFilterType;
+        });
+        voice.filterNode.type = selectedFilterType;
+        
+      }
+
+    
+
+    window.addEventListener('load', init);
+    </script>
+
+</head>
+
+
+<body class="bg-gray-900 text-white">
+  <div class="container mx-auto">
+    <h1 class="text-4xl text-center">Web Audio API Test</h1>
+    <div class="flex justify-center">
+      <div class="w-1/2">
+        <div class="flex flex-col justify-center gap-4">
+          <div class="w-1/2">
+            <label for="waveType">Onda</label>
+            <select id="waveType" class="w-full" onchange="changeWaveType()">
+              <option value="sine">Seno</option>
+              <option value="square">Cuadrada</option>
+              <option value="sawtooth">Diente de sierra</option>
+              <option value="triangle">Triangular</option>
+            </select>
+          </div>
+          <div class="w-1/2">
+            <label for="filterType">Filtro</label>
+            <select id="filterType" class="w-full" onchange="changeFilterType()">
+              <option value="lowpass">Paso bajo</option>
+              <option value="highpass">Paso alto</option>
+              <option value="bandpass">Paso de banda</option>
+              <option value="lowshelf">Bajo estante</option>
+              <option value="highshelf">Alto estante</option>
+              <option value="peaking">Pico</option>
+              <option value="notch">Notch</option>
+              <option value="allpass">Allpass</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex flex-col justify-center gap-4">
+          <div class="w-1/2">
+            <label for="filterFrequency">Frecuencia</label>
+            <input id="filterFrequency" type="range" min="20" max="3000" value="1000" step="1" oninput="changeFilterFrequency()">
+          </div>
+          <div class="w-1/2">
+            <label for="filterQ">Q</label>
+            <input id="filterQ" type="range" min="1" max="10" value="4" step="1" oninput="changeFilterQ()">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+
+</html>
+

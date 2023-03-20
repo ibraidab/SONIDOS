@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web MIDI Monitor</title>
+</head>
+<body>
+    <h1>Web MIDI Monitor</h1>
+    <div id="log"></div>
+
+    <script>
+        if (navigator.requestMIDIAccess) {
+            navigator.requestMIDIAccess()
+                .then(onMIDISuccess, onMIDIFailure);
+        } else {
+            console.log("Web MIDI API not supported in this browser.");
+        }
+
+        function onMIDISuccess(midiAccess) {
+            for (let input of midiAccess.inputs.values()) {
+                input.onmidimessage = handleMIDIMessage;
+            }
+        }
+
+        function onMIDIFailure() {
+            console.log("Could not access MIDI devices.");
+        }
+
+        function handleMIDIMessage(event) {
+            let logDiv = document.getElementById("log");
+            let msg = "MIDI Message: ";
+
+            for (let i = 0; i < event.data.length; i++) {
+                msg += event.data[i].toString(16) + " ";
+            }
+
+            logDiv.innerHTML = "<p>" + msg + "</p>";
+        }
+    </script>
+</body>
+</html>

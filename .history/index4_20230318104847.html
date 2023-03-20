@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Audio API Test</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.16/dist/tailwind.min.css" rel="stylesheet">
+  <script>
+    let audioContext;
+    let activeVoices = new Map(); // Almacenar voces activas para polifonía
+
+    async function init() {
+      audioContext = new AudioContext();
+
+      // Solicitar acceso al API Web MIDI
+      if (navigator.requestMIDIAccess) {
+        try {
+          const midiAccess = await navigator.requestMIDIAccess();
+          midiAccess.inputs.forEach(input => input.onmidimessage = onMidiMessage);
+        } catch (err) {
+          console.error('No se pudo acceder a tus dispositivos MIDI.', err);
+        }
+      } else {
+        console.error('Tu navegador no soporta el API Web MIDI.');
+      }
+    }
+
+    function onMidiMessage(event) {
+      const [status, data1, data2] = event.data;
+      const messageType = status & 0xf0;
+      const channel = status & 0x0f;
+      const note = data1;
+      const velocity = data2;
+
+      // Nota encendida
+      if (messageType === 0x90 && velocity > 0) {
+        startSound(note, velocity / 127);
+      }
+      // Nota apagada
+      else if (messageType === 0x80 || (messageType === 0x90 && velocity === 0)) {
+        stopSound(note);
+      }
+    }
+
+    function startSound(note, velocity) {
+      const frequency = midiNoteToFrequency(note);
+      const waveType = document.getElementById("waveType").value;
+
+      // Osciladores
+      const osc1 = audioContext.createOscillator();
+      osc1.frequency.value = frequency;
+      osc1.type = waveType;
+      osc1.start();
+
+      const osc2 = audioContext.createOscillator();
+      osc2.frequency.value = frequency * 2;
+      osc2.type = waveType;
+      osc2.start();
+
+      // Ganancia
+      const gainNode = audioContext.createGain();
+
+      // Filtro
+      const filterNode = audioContext.createBiquadFilter();
+      filterNode.type = "lowpass";
+      filterNode.frequency.value = 1000;
+      filterNode.Q.value = 10;
+
+      // Envolvente ADSR
+      const attack = 0.1;
+      const decay = 0.3;
+      const sustain = 0.5;
+      const release = 0.8;
+
+      const now = audioContext.currentTime;
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(velocity, now + attack);
+      gainNode.gain.linearRampToValueAtTime(sustain * velocity, now + attack + decay);
+
+      // Conexiones
+      osc1.connect(gainNode);
+      osc2.connect(gainNode);
+      gainNode.connect(filterNode);
+      filterNode.connect(audioContext.destination);
+
+      // Almacenar voces activas
+      activeVoices.set(note, { osc1, osc2, gainNode });
+    }
+
+    function stopSound(note) {
+      const voice = activeVoices

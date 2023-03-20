@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Audio API Test</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.16/dist/tailwind.min.css" rel="stylesheet">
+  <script>
+    let audioContext;
+    let osc1, osc2;
+    let started = false;
+
+    async function init() {
+      audioContext = new AudioContext();
+
+      // Solicitar acceso al API Web MIDI
+      if (navigator.requestMIDIAccess) {
+        try {
+          const midiAccess = await navigator.requestMIDIAccess();
+          midiAccess.inputs.forEach(input => input.onmidimessage = onMidiMessage);
+        } catch (err) {
+          console.error('No se pudo acceder a tus dispositivos MIDI.', err);
+        }
+      } else {
+        console.error('Tu navegador no soporta el API Web MIDI.');
+      }
+    }
+
+    function onMidiMessage(event) {
+      const [status, data1, data2] = event.data;
+      const messageType = status & 0xf0;
+      const channel = status & 0x0f;
+      const note = data1;
+      const velocity = data2;
+
+      // Nota encendida
+      if (messageType === 0x90 && velocity > 0) {
+        startSound(note);
+      }
+      // Nota apagada
+      else if (messageType === 0x80 || (messageType === 0x90 && velocity === 0)) {
+        stopSound(note);
+      }
+      // Controladores MIDI (p. ej., perillas, deslizadores)
+      else if (messageType === 0xb0) {
+        // Aquí puedes asignar diferentes controles a diferentes funciones
+        // (e.g., modificar la frecuencia del filtro, cambiar la ganancia, etc.)
+      }
+    }
+
+    function startSound(note) {
+      if (!started) {
+        startStop();
+      }
+      const frequency = midiNoteToFrequency(note);
+      osc1.frequency.value = frequency;
+      osc2.frequency.value = frequency * 2;
+    }
+
+    function stopSound(note) {
+      // Detener el sonido si es necesario (por ejemplo, si estás utilizando envolventes de amplitud)
+    }
+
+    function midiNoteToFrequency(note) {
+      return 440 * Math.pow(2, (note - 69) / 12);
+    }
+
+    function startStop() {
+      if (started) {
+        osc1.stop();
+        osc2.stop();
+        started = false;
+      } else {
+        // Osciladores
+        osc1 = audioContext.createOscillator();
+        osc1.frequency.value = 440;
+        osc1.type = "sawtooth";
+        osc1.start();
+
+        osc2 = audioContext.createOscillator();
+        osc2.frequency.value = 440 * 2;
+        osc2.type = "square";
+        osc2.start();
+
+        // Ganancia
+        const gainNode = audioContext.createGain();
+        gainNode.gain.value = 0.5;
+
+        // Filtro
+        const filterNode = audioContext.createBiquadFilter();
+        filterNode.type = "lowpass";
+        filterNode.frequency.value = 1000;
+        
+        // Conexiones
+        osc1.connect(gainNode);
+        osc2.connect(gainNode);
+        

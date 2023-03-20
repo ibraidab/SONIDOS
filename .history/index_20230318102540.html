@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Web Audio API Test</title>
+  <script>
+    let context;
+    let oscillator;
+
+    function init() {
+      context = new AudioContext();
+    }
+
+    function startStop() {
+      if (oscillator) {
+        oscillator.stop();
+        oscillator = null;
+      } else {
+        oscillator = context.createOscillator();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = 440;
+        oscillator.connect(context.destination);
+        oscillator.start();
+      }
+    }
+  </script>
+</head>
+<body onload="init()">
+  <button onclick="startStop()">Iniciar/Detener</button>
+</body>
+</html>

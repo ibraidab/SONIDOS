@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web MIDI Monitor</title>
+</head>
+<body>
+    <h1>Web MIDI Monitor</h1>
+    <div id="log"></div>
+
+    <script>
+        if (navigator.requestMIDIAccess) {
+            navigator.requestMIDIAccess()
+                .then(onMIDISuccess, onMIDIFailure);
+        } else {
+            console.log("Web MIDI API not supported in this browser.");
+        }
+
+        function onMIDISuccess(midiAccess) {
+            for (let input of midiAccess.inputs.values()) {
+                input.onmidimessage = handleMIDIMessage;
+            }
+        }
+
+        function onMIDIFailure() {
+            console.log("Could not access MIDI devices.");
+        }
+
+        function handleMIDIMessage(message) {
+    const command = message.data[0];
+    const controllerNumber = message.data[1];
+    const value = message.data[2];
+
+    // Verificar si es un mensaje de control change
+    if (command >= 0xB0 && command <= 0xBF) {
+        console.log(`Control Change: controlador = ${controllerNumber}, valor = ${value}`);
+    }
+}
+    </script>
+</body>
+</html>

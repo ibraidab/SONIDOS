@@ -1,0 +1,100 @@
+// Botón 4 (Right)
+updateWaveType("triangle");
+break;
+}
+}
+
+function updateFilterFrequency(value) {
+globalFilter.frequency.value = value * 24000;
+}
+
+function updateFilterQ(value) {
+const maxQ = 20;
+globalFilter.Q.value = value * maxQ;
+}
+
+function updateWaveType(waveType) {
+activeVoices.forEach((voice) => {
+voice.osc1.type = waveType;
+voice.osc2.type = waveType;
+});
+}
+
+function midiNoteToFrequency(note) {
+return 440 * Math.pow(2, (note - 69) / 12);
+}
+
+function createFilter() {
+const filter = audioContext.createBiquadFilter();
+filter.type = "lowpass";
+filter.frequency.value = 24000;
+filter.Q.value = 0;
+return filter;
+}
+
+function startSound(note, velocity) {
+const frequency = midiNoteToFrequency(note);
+const waveType = "sine";
+
+const osc1 = audioContext.createOscillator();
+osc1.frequency.value = frequency;
+osc1.type = waveType;
+osc1.start();
+
+const osc2 = audioContext.createOscillator();
+osc2.frequency.value = frequency * 0.5;
+osc2.type = waveType;
+osc2.start();
+
+const gainNode = audioContext.createGain();
+
+const attack = 0.09;
+const decay = 0.3;
+const sustain = 0.5;
+const release = 0.3;
+
+const now = audioContext.currentTime;
+gainNode.gain.setValueAtTime(0, now);
+gainNode.gain.linearRampToValueAtTime(velocity, now + attack);
+gainNode.gain.linearRampToValueAtTime(sustain * velocity, now + attack + decay);
+
+const voiceFilter = createFilter();
+voiceFilter.frequency.value = globalFilter.frequency.value;
+voiceFilter.Q.value = globalFilter.Q.value;
+
+osc1.connect(voiceFilter);
+osc2.connect(voiceFilter);
+voiceFilter.connect(gainNode);
+
+gainNode.connect(audioContext.destination);
+
+activeVoices.set(note, { osc1, osc2, gainNode, filterNode: voiceFilter });
+}
+
+function stopSound(note) {
+const voice = activeVoices.get(note);
+
+if (voice) {
+const release = 0.3;
+const now = audioContext.currentTime;
+voice.gainNode.gain.cancelScheduledValues(now);
+voice.gainNode.gain.setValueAtTime(voice.gainNode.gain.value, now);
+voice.gainNode.gain.linearRampToValueAtTime(0, now + release);
+
+setTimeout(() => {
+voice.osc1.stop();
+voice.osc2.stop();
+voice.gainNode.disconnect();
+voice.filterNode.disconnect();
+}, release * 1000);
+
+activeVoices.delete(note);
+}
+}
+
+init();
+</script>
+</head>
+<body>
+</body>
+</html>

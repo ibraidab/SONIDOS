@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Audio API Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.16/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: rgba(30, 41, 59, 0.8);
+        }
+    </style>
+    <script>
+        let audioContext;
+        let activeVoices = new Map();
+
+        async function init() {
+            audioContext = new AudioContext();
+            if (navigator.requestMIDIAccess) {
+                try {
+                    const midiAccess = await navigator.requestMIDIAccess();
+                    midiAccess.inputs.forEach(input => input.onmidimessage = onMidiMessage);
+                } catch (err) {
+                    console.error('No se pudo acceder a tus dispositivos MIDI.', err);
+                }
+            } else {
+                console.error('Tu navegador no soporta el API Web MIDI.');
+            }
+        }
+
+        function onMidiMessage(event) {
+            const [status, data1, data2] = event.data;
+            const messageType = status & 0xf0;
+            const channel = status & 0x0f;
+            const note = data1;
+            const velocity = data2;
+            if (messageType === 0x90 && velocity > 0) {
+                startSound(note, velocity / 127);
+            }
+            else if (messageType === 0x80 || (messageType === 0x90 && velocity === 0)) {
+                stopSound(note);
+            }
+        }
+
+        //midi function to control values with knowbs for launchkey mini
+        //knobs
+        if (navigator.requestMIDIAccess) {
+            navigator.requestMIDIAccess({ sysex: false })
+                .then(onMIDISuccess, onMIDIFailure);
+        } else {
+            alert("Web MIDI API no es soportado en este navegador.");
+        }
+        
+        function onMIDISuccess(midiAccess) {
+            const inputs = midiAccess.inputs.values();
+            for (let input = inputs.next(); input && !input.done; input = inputs.next()) {
+                input.value.onmidimessage = onMIDIMessage;
+            }
+        }
+        
+        function onMIDIFailure() {
+            alert("No se pudo acceder a tus dispositivos MIDI.");
+        }
+        
+        function onMidiMessage(event) {
+            const [status, data1, data2] = event.data;
+            const messageType = status & 0xf0;
+            const channel = status & 0x0f;
+            const note = data1;
+            const velocity = data2;
+        
+            // Nota encendida
+            if (messageType === 0x90 && velocity > 0) {
+                startSound(note, velocity / 127);
+            }
+            // Nota apagada
+            else if (messageType === 0x80 || (messageType === 0x90 && velocity === 0)) {
+                stopSound(note);
+            }
+            // Controlador MIDI (Knobs)
+            else if (messageType === 0xB0) {
+                handleKnob(note, velocity);
+            }
+        }
+
+        function handleKnob(knobNumber, value) {
+            const normalizedValue = value / 127;
+            console.log(`Knob: ${knobNumber}, Valor: ${value}`);
+            const floatValue = value / 127; // Normalizar el valor entre 0 y 1
+        
+            switch (knobNumber) {
+                case 21: // Knob 1: controlar el pitch del oscilador 1
+                    updatePitch(osc1, value);
+                    break;
+                case 22: // Knob 2: controlar el pitch del oscilador 2
+                    updatePitch(osc2, value);
+                    break;
+                case 23: // Knob 3: controlar la frecuencia del filtro
+                activeVoices.forEach(voice => {
+                    //voice.filterNode.frequency.value = normalizedValue * 24000; // Rango de 0 a 24000 Hz
+                    //aply de value all time
+                    voice.filterNode.frequency.setValueAtTime(normalizedValue * 24000, audioContext.currentTime);
+                    //save the filter vaule
+                    voice.filterNode.frequency.value = normalizedValue * 24000;
+                    console.log('filterNode frequency updated:', voice.filterNode.frequency.value);
+                });
+                    break;
+                case 24: // Knob 4: controlar la resonancia (Q) del filtro
+                    updateFilterQ(filterNode, floatValue);
+                    break;
+                // Agrega más casos si deseas controlar más parámetros con otros knobs
+            }
+        }
+        
+        function updatePitch(oscillator, value) {
+            const frequency = midiNoteToFrequency(value);
+            oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+        }
+        
+        function updateFilterFrequency(filter, value) {
+            const maxFrequency = 24000;
+            const frequency = value / 127 * maxFrequency;
+            console.log(frequency);
+            filter.frequency.setValueAtTime(frequency, audioContext.currentTime);
+        }
+        
+        function updateFilterQ(filter, floatValue) {
+            const maxQ = 100;
+            const Q = floatValue * maxQ;
+            filter.Q.setValueAtTime(Q, audioContext.currentTime);
+        }
+
+
+
+        function startSound(note, velocity) {
+            const filterType = document.getElementById("filterType").value;
+            const filterFrequency = parseFloat(document.getElementById("filterFrequency").value);
+            const filterQ = parseFloat(document.getElementById("filterQ").value);
+
+            const frequency = midiNoteToFrequency(note);
+            const waveType = document.getElementById("waveType").value;
+
+            const osc1 = audioContext.createOscillator();
+            osc1.frequency.value = frequency;
+            osc1.type = waveType;
+            osc1.start();
+
+            const osc2 = audioContext.createOscillator();
+            osc2.frequency.value = frequency * 0.5;
+            osc2.type = waveType;
+            osc2.start();
+
+            const gainNode = audioContext.createGain();
+            const filterNode = audioContext.createBiquadFilter();
+
+
+            filterNode.type = filterType;
+            filterNode.frequency.value = filterFrequency;
+            filterNode.Q.value = filterQ;
+
+            const attack = 0;
+            const decay = 0.3;
+            const sustain = 0.5;
+            const release = 0.3;
+
+            const now = audioContext.currentTime;
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(velocity, now + attack);
+            gainNode.gain.linearRampToValueAtTime(sustain * velocity, now + attack + decay);
+
+            osc1.connect(filterNode);
+            osc2.connect(filterNode);
+            filterNode.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            activeVoices.set(note, { osc1, osc2, gainNode, filterNode });
+        }
+
+        function stopSound(note) {
+            const voice = activeVoices && activeVoices.get(note);
+            if (voice) {
+                const { osc1, osc2, gainNode, filterNode } = voice;
+                const now = audioContext.currentTime;
+                gainNode.gain.cancelScheduledValues(now);
+                gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+                gainNode.gain.linearRampToValueAtTime(0, now + 0.1);
+                osc1.stop(now + 0.1);
+                osc2.stop(now + 0.1);
+
+                setTimeout(() => {
+                    osc1.disconnect(filterNode);
+                    osc2.disconnect(filterNode);
+                    filterNode.disconnect(gainNode);
+                    gainNode.disconnect(audioContext.destination);
+                }, 100);
+
+                activeVoices.delete(note);
+            }
+        }
+
+        function midiNoteToFrequency(note) {
+            return 440 * Math.pow(2, (note - 69) / 12);
+        }
+
+        window.addEventListener('load', init);
+      
+        </script>
+    </head>
+    <body class="bg-opacity-80 bg-gradient-to-r from-purple-800 via-blue-500 to-green-500 min-h-screen">
+        <div class="container mx-auto p-4">
+            <h1 class="text-2xl mb-4 text-white">Web Audio API Test</h1>
+            <div class="mb-4">
+                <label for="waveType" class="text-white">Wave Type:</label>
+                <select id="waveType" class="bg-white rounded">
+                    <option value="sine">Sine</option>
+                    <option value="square">Square</option>
+                    <option value="sawtooth">Sawtooth</option>
+                    <option value="triangle">Triangle</option>
+                </select>
+            </div>
+            <div class="mb-4">
+                <label for="filterType" class="text-white">Filter Type:</label>
+                <select id="filterType" class="bg-white rounded">
+                    <option value="lowpass">Lowpass</option>
+                    <option value="highpass">Highpass</option>
+                    <option value="bandpass">Bandpass</option>
+                </select>
+            </div>
+            <div class="mb-4">
+                <label for="filterFrequency" class="text-white">Filter Frequency:</label>
+                <input type="range" id="filterFrequency" value="1000" min="0" max="24000" step="1" class="w-full">
+            </div>
+            <div class="mb-4">
+                <label for="filterQ" class="text-white">Filter Q:</label>
+                <input type="number" id="filterQ" value="10" min="0.0001" max="100" step="0.1" class="bg-white rounded">
+            </div>
+        </div>
+    </body>
+    </html>

@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Audio API Test</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.16/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: rgba(30, 41, 59, 0.8);
+        }
+    </style>
+    <script>
+        let audioContext;
+        let activeVoices = new Map();
+        let globalFilter;
+        let currentAttack = 0.001;
+        let currentDecay = 0.1;
+        let currentSustain = 0.5;
+        let currentRelease = 0.1;
+        const waveTypes = ["sine", "sawtooth", "triangle"];
+        const filterTypes = ["lowpass", "highpass", "bandpass"];
+
+        let currentWaveTypeIndex = 0;
+        let currentFilterTypeIndex = 0;
+        let pitchBendAmount = 0;
+        let modulationAmount = 0;
+
+
+
+        async function init() {
+            audioContext = new AudioContext();
+            globalGain = audioContext.createGain();
+            globalGain.gain.value = 0.125;
+            globalFilter = createFilter();
+            globalFilter.connect(globalGain);
+            globalGain.connect(audioContext.destination);
+            if (navigator.requestMIDIAccess) {
+                try {
+                    const midiAccess = await navigator.requestMIDIAccess();
+                    midiAccess.inputs.forEach(input => input.onmidimessage = onMidiMessage);
+                } catch (err) {
+                    console.error('No se pudo acceder a tus dispositivos MIDI.', err);
+                }
+            } else {
+                console.error('Tu navegador no soporta el API Web MIDI.');
+            }
+        }
+
+        function onMidiMessage(event) {
+            const [status, data1, data2] = event.data;
+            const messageType = status & 0xf0;
+            const channel = status & 0x0f;
+            //console.log(channel)
+            const note = data1;
+            const velocity = data2;
+
+            // Nota encendida
+            if (messageType === 0x90 && velocity > 0) {
+                startSound(note, velocity / 127);
+            }
+            // Nota apagada
+            else if (messageType === 0x80 || (messageType === 0x90 && velocity === 0)) {
+                stopSound(note);
+            }
+            // Controlador MIDI (Knobs)
+            else if (messageType === 0xB0) {
+                handleKnob(note, velocity);
+            }
+        }
+
+        function handleKnob(knobNumber, value) {
+            const normalizedValue = value / 127;
+
+            switch (knobNumber) {
+                case 102: // Knob 1: controlar el pitch del oscilador 1
+                    updateFilterFrequency(normalizedValue);
+                    break;
+                case 105: // Knob 2: controlar el pitch del oscilador 2
+                    updateFilterQ(normalizedValue);
+                    break;
+                case 16: // Knob 23: controlar la frecuencia de modulación
+                    const maxModulationFrequency = 200; // frecuencia máxima de modulación en Hz
+                    modulationFrequency = normalizedValue * maxModulationFrequency;
+                    activeVoices.forEach((voice) => {
+                        voice.lfo.frequency.value = modulationFrequency;
+                        console.log("Modulation frequency updated:", modulationFrequency);
+                    });
+                    break;
+
+                case 1: // Knob 24: controlar la modulación
+                const maxModulationAmount = 1; // cantidad máxima de modulación en semitonos
+                modulationAmount = Math.pow(normalizedValue, 2) * maxModulationAmount;
+                activeVoices.forEach((voice) => {
+                    voice.modulationGain.gain.value = modulationAmount;
+                    console.log("Modulation amount updated:", modulationAmount);
+                });
+                break;
+
+                case 14: // Knob 5: controlar el ataque del filtro
+                    const minAttack = 0.001;
+                    const maxAttack = 2;
+                    currentAttack = minAttack + (maxAttack - minAttack) * normalizedValue;
+                    console.log("currentAttack value updated:", currentAttack);
+                    break;
+
+                case 15: // Knob 6: controlar el decay del filtro
+                    const minDecay = 0.001;
+                    const maxDecay = 5;
+                    currentDecay = minDecay + (maxDecay - minDecay) * normalizedValue;
+                    console.log("currentDecay value updated:", currentDecay);
+                    break;
+
+                case 13: // Knob 7: controlar el sustain del filtro
+                    const minSustain = 0.01;
+                    const maxSustain = 1;
+                    currentSustain = minSustain + (maxSustain - minSustain) * normalizedValue;
+                    console.log("currentSustain value updated:", currentSustain);
+                    break;
+
+                case 12: // Knob 8: controlar el release del filtro
+                    const minRelease = 0.001;
+                    const maxRelease = 10;
+                    currentRelease = minRelease + (maxRelease - minRelease) * normalizedValue;
+                    console.log("currentRelease value updated:", currentRelease);
+                    break;
+
+                case 104: // Botón 104: Cambiar el tipo de onda hacia atrás
+                    currentWaveTypeIndex--;
+                    if (currentWaveTypeIndex < 0) {
+                        currentWaveTypeIndex = waveTypes.length - 1;
+                    }
+                    console.log("Wave type changed to:", waveTypes[currentWaveTypeIndex]);
+                    break;
+
+                case 98: // Botón 108: Cambiar el tipo de filtro hacia atrás
+                    currentFilterTypeIndex--;
+                    if (currentFilterTypeIndex < 0) {
+                        currentFilterTypeIndex = filterTypes.length - 1;
+                    }
+                    console.log("Filter type changed to:", filterTypes[currentFilterTypeIndex]);
+                    break;
+
+                //224 pitch bend
+                case 224:
+                    pitchBendAmount = (normalizedValue - 0.5) * 2; // Centra el valor de pitch bend
+                    activeVoices.forEach((voice) => {
+                        voice.osc1.frequency.value *= Math.pow(2, pitchBendAmount / 12);
+                        voice.osc2.frequency.value *= Math.pow(2, pitchBendAmount / 12);
+                        console.log("Pitch bend updated:", pitchBendAmount);
+                    });
+                    break;
+            }
+        }
+
+        function updateFilterFrequency(value) {
+            globalFilter.frequency.value = value * 22050;
+            console.log("globalFilter.frequency.value:", globalFilter.frequency.value)
+        }
+
+        function updateFilterQ(value) {
+            const maxQ = 1;
+            globalFilter.Q.value = value * maxQ;
+            console.log("globalFilter.Q.value:", globalFilter.Q.value)
+        }
+
+        function updateWaveType(waveType) {
+            activeVoices.forEach((voice) => {
+                voice.osc1.type = waveType;
+                voice.osc2.type = waveType;
+            });
+        }
+
+        function midiNoteToFrequency(note) {
+            return 440 * Math.pow(2, (note - 69) / 12);
+        }
+
+        function createFilter(filterType) {
+            const filter = audioContext.createBiquadFilter();
+
+            filter.type = filterType;
+            filter.frequency.value = 22050;
+            filter.Q.value = 0;
+            return filter;
+        }
+
+        function startSound(note, velocity) {
+            const frequency = midiNoteToFrequency(note);
+            const waveType = waveTypes[currentWaveTypeIndex];
+            const filterType = filterTypes[currentFilterTypeIndex];
+            const waveType1 = document.getElementById("waveType1").value;
+            const waveType2 = waveType;
+
+            const osc1 = audioContext.createOscillator();
+            osc1.frequency.value = frequency;
+            osc1.type = waveType1;
+            osc1.start();
+
+            const osc2 = audioContext.createOscillator();
+            osc2.frequency.value = frequency * 0.5;
+            osc2.type = waveType2;
+            osc2.start();
+
+            const gainNode = audioContext.createGain();
+
+            const attack = currentAttack;
+            const decay = currentDecay;
+            const sustain = currentSustain;
+            const release = currentRelease;
+
+            /*const modulationLFO = audioContext.createOscillator();
+            //const modulationGain = audioContext.createGain();
+            modulationLFO.frequency.value = 5; // Frecuencia de la modulación LFO
+            modulationLFO.type = "sine"; // Tipo de onda para la modulación LFO
+            modulationLFO.start();*/
+
+            const now = audioContext.currentTime;
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(velocity, now + attack);
+            gainNode.gain.linearRampToValueAtTime(sustain * velocity, now + attack + decay);
+
+            const voiceFilter = createFilter(filterType);
+            voiceFilter.frequency.value = globalFilter.frequency.value;
+            voiceFilter.Q.value = globalFilter.Q.value;
+
+
+
+            // Modificación: conectar osciladores a la modulación
+            const vibratoGain = audioContext.createGain();
+            const lfo = audioContext.createOscillator();
+            lfo.frequency.value = 5; // frecuencia de modulación inicial
+            lfo.start();
+
+            lfo.connect(vibratoGain);
+            vibratoGain.connect(osc1.frequency);
+            vibratoGain.connect(osc2.frequency);
+            vibratoGain.gain.value = 0; // ganancia inicial para vibrato desactivado al inicio
+
+            osc1.connect(voiceFilter);
+            osc2.connect(voiceFilter);
+
+            voiceFilter.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            activeVoices.set(note, {
+                osc1,
+                osc2,
+                gainNode,
+                filterNode: voiceFilter,
+                attack,
+                decay,
+                sustain,
+                release,
+                lfo,
+                vibratoGain // Agregar la modulación al objeto de voz
+            });
+        }
+        function stopSound(note) {
+            const voice = activeVoices.get(note);
+
+            if (voice) {
+                const release = 0.3;
+                const now = audioContext.currentTime;
+                voice.gainNode.gain.cancelScheduledValues(now);
+                voice.gainNode.gain.setValueAtTime(voice.gainNode.gain.value, now);
+                voice.gainNode.gain.linearRampToValueAtTime(0, now + release);
+
+                setTimeout(() => {
+                    voice.osc1.stop();
+                    voice.osc2.stop();
+                    voice.gainNode.disconnect();
+                    voice.filterNode.disconnect();
+                }, release * 1000);
+
+                activeVoices.delete(note);
+            }
+        }
+
+        init();
+    </script>
+</head>
+
+<body class="bg-opacity-80 bg-gradient-to-r from-purple-800 via-blue-500 to-green-500 min-h-screen">
+    <div class="container mx-auto p-4">
+        <h1 class="text-2xl mb-4 text-white">Web Audio API Test</h1>
+        <div class="mb-4">
+            <label for="waveType1" class="text-white">Wave Type 1:</label>
+            <select id="waveType1" class="bg-white rounded">
+
+                <option value="square">Square</option>
+                <option value="sine">Sine</option>
+                <option value="sawtooth">Sawtooth</option>
+                <option value="triangle">Triangle</option>
+            </select>
+            <label for="waveType2" class="text-white">Wave Type 2:</label>
+            <select id="waveType2" class="bg-white rounded">
+                <option value="square">Square</option>
+                <option value="sine">Sine</option>
+                <option value="sawtooth">Sawtooth</option>
+                <option value="triangle">Triangle</option>
+            </select>
+        </div>
+        <div class="mb-4">
+            <label for="filterType" class="text-white">Filter Type:</label>
+            <select id="filterType" class="bg-white rounded">
+                <option value="lowpass">Lowpass</option>
+                <option value="highpass">Highpass</option>
+                <option value="bandpass">Bandpass</option>
+            </select>
+        </div>
+        <div class="mb-4">
+            <label for="filterFrequency" class="text-white">Filter Frequency:</label>
+            <!-- <input type="range" id="filterFrequency" value="1000" min="0" max="22050" step="1" class="w-full"> -->
+        </div>
+        <div class="mb-4">
+            <label for="filterQ" class="text-white">Filter Q:</label>
+            <!-- <input type="number" id="filterQ" value="10" min="0.0001" max="100" step="0.1" class="bg-white rounded"> -->
+        </div>
+    </div>
+</body>
+
+</html>

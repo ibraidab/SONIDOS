@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tone.js Test</title>
+  <script src="https://cdn.tonejs.io/14.8.34/Tone.js"></script>
+  <script>
+    let synth;
+
+    function init() {
+      synth = new Tone.Oscillator(440, "sine").toDestination();
+    }
+
+    function startStop() {
+      if (synth.state === "started") {
+        synth.stop();
+      } else {
+        synth.start();
+      }
+    }
+  </script>
+</head>
+<body onload="init()">
+  <button onclick="startStop()">Iniciar/Detener</button>
+</body>
+</html>
